@@ -40,7 +40,9 @@ ENDPOINTS = {
     "rectangular_pattern": f"{BASE_URL}/rectangular_pattern",
     "draw_text": f"{BASE_URL}/draw_text",
     "move_body": f"{BASE_URL}/move_body",
-    
+    "rotate_body": f"{BASE_URL}/rotate_body",
+    "delete_last_body": f"{BASE_URL}/delete_last_body",
+
 }
 
 # Request Headers

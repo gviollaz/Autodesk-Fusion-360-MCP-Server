@@ -135,7 +135,11 @@ class TaskEventHandler(adsk.core.CustomEventHandler):
             draw_text(design, ui, task[1], task[2], task[3], task[4], task[5], task[6], task[7], task[8], task[9],task[10])
         elif task[0] == 'move_body':
             move_last_body(design,ui,task[1],task[2],task[3])
-        
+        elif task[0] == 'rotate_body':
+            rotate_last_body(design, ui, task[1], task[2])
+        elif task[0] == 'delete_last_body':
+            delete_last_body(design, ui)
+
 
 
 class TaskThread(threading.Thread):
@@ -489,6 +493,75 @@ def move_last_body(design,ui,x,y,z):
     except:
         if ui:
             ui.messageBox('Failed to move the body:\n{}'.format(traceback.format_exc()))
+
+
+def rotate_last_body(design, ui, angle, axis="Z"):
+    """
+    Dreht den zuletzt erstellten Body um eine Achse (X, Y oder Z).
+    angle: Drehwinkel in Grad (positiv = gegen den Uhrzeigersinn um die Achse).
+    axis: "X", "Y" oder "Z" (Default Z).
+    Die Drehung erfolgt um den Mittelpunkt (Bounding-Box-Zentrum) des Bodies,
+    der Body dreht sich also an Ort und Stelle.
+    """
+    try:
+        rootComp = design.rootComponent
+        moveFeats = rootComp.features.moveFeatures
+        body = rootComp.bRepBodies
+        if body.count == 0:
+            if ui:
+                ui.messageBox("Keine Bodies gefunden.")
+            return
+
+        latest_body = body.item(body.count - 1)
+        bodies = adsk.core.ObjectCollection.create()
+        bodies.add(latest_body)
+
+        a = str(axis or "Z").upper()
+        if a == "X":
+            axisVector = adsk.core.Vector3D.create(1, 0, 0)
+        elif a == "Y":
+            axisVector = adsk.core.Vector3D.create(0, 1, 0)
+        else:
+            axisVector = adsk.core.Vector3D.create(0, 0, 1)
+
+        # Pivot = Mittelpunkt der Bounding Box -> Drehung an Ort und Stelle
+        bb = latest_body.boundingBox
+        origin = adsk.core.Point3D.create(
+            (bb.minPoint.x + bb.maxPoint.x) / 2.0,
+            (bb.minPoint.y + bb.maxPoint.y) / 2.0,
+            (bb.minPoint.z + bb.maxPoint.z) / 2.0)
+
+        angleRad = float(angle) * math.pi / 180.0  # Grad -> Radiant
+        transform = adsk.core.Matrix3D.create()
+        transform.setToRotation(angleRad, axisVector, origin)
+
+        moveFeatureInput = moveFeats.createInput2(bodies)
+        moveFeatureInput.defineAsFreeMove(transform)
+        moveFeats.add(moveFeatureInput)
+    except:
+        if ui:
+            ui.messageBox('Failed to rotate the body:\n{}'.format(traceback.format_exc()))
+
+
+def delete_last_body(design, ui):
+    """
+    Löscht nur den zuletzt erstellten Body (nicht alle).
+    Praktisch um einen einzelnen Fehlversuch rückgängig zu machen,
+    ohne mit delete_everything das ganze Modell zu verlieren.
+    """
+    try:
+        rootComp = design.rootComponent
+        bodies = rootComp.bRepBodies
+        if bodies.count == 0:
+            if ui:
+                ui.messageBox("Keine Bodies zum Löschen gefunden.")
+            return
+        removeFeat = rootComp.features.removeFeatures
+        latest_body = bodies.item(bodies.count - 1)
+        removeFeat.add(latest_body)
+    except:
+        if ui:
+            ui.messageBox('Failed to delete last body:\n{}'.format(traceback.format_exc()))
 
 
 def offsetplane(design,ui,offset,plane ="XY"):
@@ -1678,7 +1751,23 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header('Content-type','application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({"message": "Body wird verschoben"}).encode('utf-8'))
-            
+
+            elif path == '/rotate_body':
+                angle = float(data.get('angle', 90))
+                axis = str(data.get('axis', 'Z'))  # 'X', 'Y' oder 'Z'
+                task_queue.put(('rotate_body', angle, axis))
+                self.send_response(200)
+                self.send_header('Content-type','application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"message": "Body wird gedreht"}).encode('utf-8'))
+
+            elif path == '/delete_last_body':
+                task_queue.put(('delete_last_body',))
+                self.send_response(200)
+                self.send_header('Content-type','application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"message": "Letzter Body wird gelöscht"}).encode('utf-8'))
+
             else:
                 self.send_error(404,'Not Found')
 

@@ -133,6 +133,46 @@ def move_latest_body(x : float,y:float,z:float):
     return send_request(endpoint, payload, headers)
 
 @mcp.tool()
+def rotate_latest_body(angle: float, axis: str = "Z"):
+    """
+    Dreht den zuletzt erstellten Körper um eine Achse, an Ort und Stelle.
+    Der Pivot ist der Mittelpunkt (Bounding-Box-Zentrum) des Körpers, der Körper
+    dreht sich also auf der Stelle ohne wegzuwandern.
+
+    angle: Drehwinkel in Grad (z.B. 90 oder -45).
+    axis: Drehachse als String "X", "Y" oder "Z" (Default "Z").
+
+    Sehr nützlich um einen Körper auszurichten, z.B. einen liegenden Zylinder
+    aufzustellen oder eine schief platzierte Säule gerade zu drehen.
+    """
+    try:
+        endpoint = config.ENDPOINTS["rotate_body"]
+        payload = {
+            "angle": angle,
+            "axis": axis
+        }
+        headers = config.HEADERS
+        return send_request(endpoint, payload, headers)
+    except Exception as e:
+        logging.error("Rotate latest body failed: %s", e)
+        raise
+
+@mcp.tool()
+def delete_last_body():
+    """
+    Löscht nur den zuletzt erstellten Körper (nicht alle).
+    Praktisch um einen einzelnen Fehlversuch rückgängig zu machen, ohne mit
+    delete_all das ganze Modell zu verlieren.
+    """
+    try:
+        endpoint = config.ENDPOINTS["delete_last_body"]
+        headers = config.HEADERS
+        return send_request(endpoint, {}, headers)
+    except Exception as e:
+        logging.error("Delete last body failed: %s", e)
+        raise
+
+@mcp.tool()
 def create_thread(inside: bool, allsizes: int):
     """Erstellt ein Gewinde in Fusion 360
     Im Moment wählt der User selber in Fusioibn 360 das Profil aus
