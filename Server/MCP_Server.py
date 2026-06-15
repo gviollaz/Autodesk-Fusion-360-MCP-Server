@@ -133,6 +133,91 @@ def move_latest_body(x : float,y:float,z:float):
     return send_request(endpoint, payload, headers)
 
 @mcp.tool()
+def rotate_body_by_index(index: int, angle: float, axis: str = "Z"):
+    """
+    Dreht den Körper mit dem angegebenen Index um eine Achse, an Ort und Stelle.
+    Wie rotate_latest_body, aber statt des letzten Körpers wählst du über den Index.
+    Den Index bekommst du über list_bodies.
+
+    index: 0-basierter Index des Körpers (0 = erster Körper).
+    angle: Drehwinkel in Grad (z.B. 90 oder -45).
+    axis: Drehachse als String "X", "Y" oder "Z" (Default "Z").
+    """
+    try:
+        endpoint = config.ENDPOINTS["rotate_body_by_index"]
+        payload = {
+            "index": index,
+            "angle": angle,
+            "axis": axis
+        }
+        headers = config.HEADERS
+        return send_request(endpoint, payload, headers)
+    except Exception as e:
+        logging.error("Rotate body by index failed: %s", e)
+        raise
+
+@mcp.tool()
+def delete_body_by_index(index: int):
+    """
+    Löscht den Körper mit dem angegebenen Index (nicht alle).
+    Wie delete_last_body, aber statt des letzten Körpers wählst du über den Index.
+    Den Index bekommst du über list_bodies.
+
+    index: 0-basierter Index des Körpers (0 = erster Körper).
+    """
+    try:
+        endpoint = config.ENDPOINTS["delete_body_by_index"]
+        payload = {
+            "index": index
+        }
+        headers = config.HEADERS
+        return send_request(endpoint, payload, headers)
+    except Exception as e:
+        logging.error("Delete body by index failed: %s", e)
+        raise
+
+@mcp.tool()
+def move_body_by_index(index: int, x: float, y: float, z: float):
+    """
+    Verschiebt den Körper mit dem angegebenen Index in x, y und z Richtung.
+    Wie move_latest_body, aber statt des letzten Körpers wählst du über den Index.
+    Den Index bekommst du über list_bodies.
+
+    index: 0-basierter Index des Körpers (0 = erster Körper).
+    x, y, z: Translationsvektor.
+    """
+    try:
+        endpoint = config.ENDPOINTS["move_body_by_index"]
+        payload = {
+            "index": index,
+            "x": x,
+            "y": y,
+            "z": z
+        }
+        headers = config.HEADERS
+        return send_request(endpoint, payload, headers)
+    except Exception as e:
+        logging.error("Move body by index failed: %s", e)
+        raise
+
+@mcp.tool()
+def list_bodies():
+    """
+    Listet alle Körper im aktuellen Modell auf.
+    Gibt für jeden Körper Index, Name, Zentrum (Bounding-Box-Mittelpunkt)
+    und Größe (dx, dy, dz) zurück.
+    Nützlich um den Index für rotate_body_by_index, delete_body_by_index
+    oder move_body_by_index zu bestimmen.
+    """
+    try:
+        endpoint = config.ENDPOINTS["list_bodies"]
+        response = requests.get(endpoint, timeout=config.REQUEST_TIMEOUT)
+        return response.json()
+    except Exception as e:
+        logging.error("List bodies failed: %s", e)
+        raise
+
+@mcp.tool()
 def create_thread(inside: bool, allsizes: int):
     """Erstellt ein Gewinde in Fusion 360
     Im Moment wählt der User selber in Fusioibn 360 das Profil aus
