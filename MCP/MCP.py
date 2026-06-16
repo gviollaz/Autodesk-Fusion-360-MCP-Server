@@ -10,6 +10,7 @@ import math
 import os
 
 ModelParameterSnapshot = []
+ModelBodiesSnapshot = []  # Thread-sicherer Snapshot der Bodies (Index, Name, Zentrum, Größe)
 httpd = None
 task_queue = queue.Queue()  # Queue für thread-safe Aktionen
 
@@ -32,12 +33,14 @@ class TaskEventHandler(adsk.core.CustomEventHandler):
         super().__init__()
         
     def notify(self, args):
-        global task_queue, ModelParameterSnapshot, design, ui
+        global task_queue, ModelParameterSnapshot, ModelBodiesSnapshot, design, ui
         try:
             if design:
                 # Parameter Snapshot aktualisieren
                 ModelParameterSnapshot = get_model_parameters(design)
-                
+                # Bodies Snapshot aktualisieren (nur im Hauptthread sicher)
+                ModelBodiesSnapshot = get_model_bodies(design)
+
                 # Task-Queue abarbeiten
                 while not task_queue.empty():
                     try:
@@ -139,6 +142,12 @@ class TaskEventHandler(adsk.core.CustomEventHandler):
             rotate_last_body(design, ui, task[1], task[2])
         elif task[0] == 'delete_last_body':
             delete_last_body(design, ui)
+        elif task[0] == 'rotate_body_by_index':
+            rotate_body_by_index(design, ui, task[1], task[2], task[3])
+        elif task[0] == 'delete_body_by_index':
+            delete_body_by_index(design, ui, task[1])
+        elif task[0] == 'move_body_by_index':
+            move_body_by_index(design, ui, task[1], task[2], task[3], task[4])
 
 
 
@@ -562,6 +571,153 @@ def delete_last_body(design, ui):
     except:
         if ui:
             ui.messageBox('Failed to delete last body:\n{}'.format(traceback.format_exc()))
+
+
+def rotate_body_by_index(design, ui, index, angle, axis="Z"):
+    """
+    Dreht den Body mit dem angegebenen Index um eine Achse (X, Y oder Z), an Ort und Stelle.
+    Wie rotate_last_body, aber statt des letzten Bodies wird über den Index ausgewählt.
+
+    index: 0-basierter Index des Bodies (0 <= index < bRepBodies.count).
+    angle: Drehwinkel in Grad (positiv = gegen den Uhrzeigersinn um die Achse).
+    axis: "X", "Y" oder "Z" (Default Z).
+    Die Drehung erfolgt um den Mittelpunkt (Bounding-Box-Zentrum) des Bodies.
+    """
+    try:
+        rootComp = design.rootComponent
+        moveFeats = rootComp.features.moveFeatures
+        body = rootComp.bRepBodies
+        index = int(index)
+        if index < 0 or index >= body.count:
+            if ui:
+                ui.messageBox("Ungültiger Body-Index: {} (count={})".format(index, body.count))
+            return
+
+        target_body = body.item(index)
+        bodies = adsk.core.ObjectCollection.create()
+        bodies.add(target_body)
+
+        a = str(axis or "Z").upper()
+        if a == "X":
+            axisVector = adsk.core.Vector3D.create(1, 0, 0)
+        elif a == "Y":
+            axisVector = adsk.core.Vector3D.create(0, 1, 0)
+        else:
+            axisVector = adsk.core.Vector3D.create(0, 0, 1)
+
+        # Pivot = Mittelpunkt der Bounding Box -> Drehung an Ort und Stelle
+        bb = target_body.boundingBox
+        origin = adsk.core.Point3D.create(
+            (bb.minPoint.x + bb.maxPoint.x) / 2.0,
+            (bb.minPoint.y + bb.maxPoint.y) / 2.0,
+            (bb.minPoint.z + bb.maxPoint.z) / 2.0)
+
+        angleRad = float(angle) * math.pi / 180.0  # Grad -> Radiant
+        transform = adsk.core.Matrix3D.create()
+        transform.setToRotation(angleRad, axisVector, origin)
+
+        moveFeatureInput = moveFeats.createInput2(bodies)
+        moveFeatureInput.defineAsFreeMove(transform)
+        moveFeats.add(moveFeatureInput)
+    except:
+        if ui:
+            ui.messageBox('Failed to rotate body by index:\n{}'.format(traceback.format_exc()))
+
+
+def delete_body_by_index(design, ui, index):
+    """
+    Löscht den Body mit dem angegebenen Index (nicht alle).
+    Wie delete_last_body, aber statt des letzten Bodies wird über den Index ausgewählt.
+
+    index: 0-basierter Index des Bodies (0 <= index < bRepBodies.count).
+    """
+    try:
+        rootComp = design.rootComponent
+        bodies = rootComp.bRepBodies
+        index = int(index)
+        if index < 0 or index >= bodies.count:
+            if ui:
+                ui.messageBox("Ungültiger Body-Index: {} (count={})".format(index, bodies.count))
+            return
+        removeFeat = rootComp.features.removeFeatures
+        target_body = bodies.item(index)
+        removeFeat.add(target_body)
+    except:
+        if ui:
+            ui.messageBox('Failed to delete body by index:\n{}'.format(traceback.format_exc()))
+
+
+def move_body_by_index(design, ui, index, x, y, z):
+    """
+    Verschiebt den Body mit dem angegebenen Index in x, y und z Richtung.
+    Wie move_last_body, aber statt des letzten Bodies wird über den Index ausgewählt.
+
+    index: 0-basierter Index des Bodies (0 <= index < bRepBodies.count).
+    x, y, z: Translationsvektor.
+    """
+    try:
+        rootComp = design.rootComponent
+        features = rootComp.features
+        moveFeats = features.moveFeatures
+        body = rootComp.bRepBodies
+        index = int(index)
+        if index < 0 or index >= body.count:
+            if ui:
+                ui.messageBox("Ungültiger Body-Index: {} (count={})".format(index, body.count))
+            return
+
+        target_body = body.item(index)
+        bodies = adsk.core.ObjectCollection.create()
+        bodies.add(target_body)
+
+        vector = adsk.core.Vector3D.create(x, y, z)
+        transform = adsk.core.Matrix3D.create()
+        transform.translation = vector
+        moveFeatureInput = moveFeats.createInput2(bodies)
+        moveFeatureInput.defineAsFreeMove(transform)
+        moveFeats.add(moveFeatureInput)
+    except:
+        if ui:
+            ui.messageBox('Failed to move body by index:\n{}'.format(traceback.format_exc()))
+
+
+def get_model_bodies(design):
+    """
+    Erstellt eine thread-sichere Liste aller Bodies im rootComponent.
+    Jeder Eintrag enthält Index, Name, Zentrum (Bounding-Box-Mittelpunkt)
+    und Größe (dx, dy, dz). Wird nur im Hauptthread (notify) aufgerufen,
+    da die Fusion-API nicht thread-safe ist.
+    """
+    bodies_info = []
+    try:
+        rootComp = design.rootComponent
+        bodies = rootComp.bRepBodies
+        for i in range(bodies.count):
+            body = bodies.item(i)
+            try:
+                bb = body.boundingBox
+                center = [
+                    (bb.minPoint.x + bb.maxPoint.x) / 2.0,
+                    (bb.minPoint.y + bb.maxPoint.y) / 2.0,
+                    (bb.minPoint.z + bb.maxPoint.z) / 2.0,
+                ]
+                size = [
+                    bb.maxPoint.x - bb.minPoint.x,
+                    bb.maxPoint.y - bb.minPoint.y,
+                    bb.maxPoint.z - bb.minPoint.z,
+                ]
+            except Exception:
+                center = [0.0, 0.0, 0.0]
+                size = [0.0, 0.0, 0.0]
+            bodies_info.append({
+                "index": i,
+                "name": str(body.name),
+                "center": center,
+                "size": size,
+            })
+    except Exception:
+        pass
+    return bodies_info
 
 
 def offsetplane(design,ui,offset,plane ="XY"):
@@ -1360,7 +1516,7 @@ def select_sketch(design,ui,Sketchname):
 # HTTP Server######
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        global ModelParameterSnapshot
+        global ModelParameterSnapshot, ModelBodiesSnapshot
         try:
             if self.path == '/count_parameters':
                 self.send_response(200)
@@ -1372,7 +1528,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header('Content-type','application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({"ModelParameter": ModelParameterSnapshot}).encode('utf-8'))
-           
+            elif self.path == '/list_bodies':
+                # Liest den thread-sicheren Snapshot, der im Hauptthread (notify) befüllt wird
+                self.send_response(200)
+                self.send_header('Content-type','application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"bodies": ModelBodiesSnapshot}).encode('utf-8'))
+
             else:
                 self.send_error(404,'Not Found')
         except Exception as e:
@@ -1768,6 +1930,35 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"message": "Letzter Body wird gelöscht"}).encode('utf-8'))
 
+            elif path == '/rotate_body_by_index':
+                index = int(data.get('index', 0))
+                angle = float(data.get('angle', 90))
+                axis = str(data.get('axis', 'Z'))  # 'X', 'Y' oder 'Z'
+                task_queue.put(('rotate_body_by_index', index, angle, axis))
+                self.send_response(200)
+                self.send_header('Content-type','application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"message": "Body wird per Index gedreht"}).encode('utf-8'))
+
+            elif path == '/delete_body_by_index':
+                index = int(data.get('index', 0))
+                task_queue.put(('delete_body_by_index', index))
+                self.send_response(200)
+                self.send_header('Content-type','application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"message": "Body wird per Index gelöscht"}).encode('utf-8'))
+
+            elif path == '/move_body_by_index':
+                index = int(data.get('index', 0))
+                x = float(data.get('x', 0))
+                y = float(data.get('y', 0))
+                z = float(data.get('z', 0))
+                task_queue.put(('move_body_by_index', index, x, y, z))
+                self.send_response(200)
+                self.send_header('Content-type','application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"message": "Body wird per Index verschoben"}).encode('utf-8'))
+
             else:
                 self.send_error(404,'Not Found')
 
@@ -1793,8 +1984,9 @@ def run(context):
             return
 
         # Initialer Snapshot
-        global ModelParameterSnapshot
+        global ModelParameterSnapshot, ModelBodiesSnapshot
         ModelParameterSnapshot = get_model_parameters(design)
+        ModelBodiesSnapshot = get_model_bodies(design)
 
         # Custom Event registrieren
         customEvent = app.registerCustomEvent(myCustomEvent) #Every 200ms we create a custom event which doesnt interfere with Fusion main thread
