@@ -133,6 +133,177 @@ def move_latest_body(x : float,y:float,z:float):
     return send_request(endpoint, payload, headers)
 
 @mcp.tool()
+def rotate_latest_body(angle: float, axis: str = "Z"):
+    """
+    Dreht den zuletzt erstellten Körper um eine Achse, an Ort und Stelle.
+    Der Pivot ist der Mittelpunkt (Bounding-Box-Zentrum) des Körpers, der Körper
+    dreht sich also auf der Stelle ohne wegzuwandern.
+
+    angle: Drehwinkel in Grad (z.B. 90 oder -45).
+    axis: Drehachse als String "X", "Y" oder "Z" (Default "Z").
+
+    Sehr nützlich um einen Körper auszurichten, z.B. einen liegenden Zylinder
+    aufzustellen oder eine schief platzierte Säule gerade zu drehen.
+    """
+    try:
+        endpoint = config.ENDPOINTS["rotate_body"]
+        payload = {
+            "angle": angle,
+            "axis": axis
+        }
+        headers = config.HEADERS
+        return send_request(endpoint, payload, headers)
+    except Exception as e:
+        logging.error("Rotate latest body failed: %s", e)
+        raise
+
+@mcp.tool()
+def delete_last_body():
+    """
+    Löscht nur den zuletzt erstellten Körper (nicht alle).
+    Praktisch um einen einzelnen Fehlversuch rückgängig zu machen, ohne mit
+    delete_all das ganze Modell zu verlieren.
+    """
+    try:
+        endpoint = config.ENDPOINTS["delete_last_body"]
+        headers = config.HEADERS
+        return send_request(endpoint, {}, headers)
+    except Exception as e:
+        logging.error("Delete last body failed: %s", e)
+        raise
+
+@mcp.tool()
+def rotate_body_by_index(index: int, angle: float, axis: str = "Z"):
+    """
+    Dreht den Körper mit dem angegebenen Index um eine Achse, an Ort und Stelle.
+    Wie rotate_latest_body, aber statt des letzten Körpers wählst du über den Index.
+    Den Index bekommst du über list_bodies.
+
+    index: 0-basierter Index des Körpers (0 = erster Körper).
+    angle: Drehwinkel in Grad (z.B. 90 oder -45).
+    axis: Drehachse als String "X", "Y" oder "Z" (Default "Z").
+    """
+    try:
+        endpoint = config.ENDPOINTS["rotate_body_by_index"]
+        payload = {
+            "index": index,
+            "angle": angle,
+            "axis": axis
+        }
+        headers = config.HEADERS
+        return send_request(endpoint, payload, headers)
+    except Exception as e:
+        logging.error("Rotate body by index failed: %s", e)
+        raise
+
+@mcp.tool()
+def delete_body_by_index(index: int):
+    """
+    Löscht den Körper mit dem angegebenen Index (nicht alle).
+    Wie delete_last_body, aber statt des letzten Körpers wählst du über den Index.
+    Den Index bekommst du über list_bodies.
+
+    index: 0-basierter Index des Körpers (0 = erster Körper).
+    """
+    try:
+        endpoint = config.ENDPOINTS["delete_body_by_index"]
+        payload = {
+            "index": index
+        }
+        headers = config.HEADERS
+        return send_request(endpoint, payload, headers)
+    except Exception as e:
+        logging.error("Delete body by index failed: %s", e)
+        raise
+
+@mcp.tool()
+def move_body_by_index(index: int, x: float, y: float, z: float):
+    """
+    Verschiebt den Körper mit dem angegebenen Index in x, y und z Richtung.
+    Wie move_latest_body, aber statt des letzten Körpers wählst du über den Index.
+    Den Index bekommst du über list_bodies.
+
+    index: 0-basierter Index des Körpers (0 = erster Körper).
+    x, y, z: Translationsvektor.
+    """
+    try:
+        endpoint = config.ENDPOINTS["move_body_by_index"]
+        payload = {
+            "index": index,
+            "x": x,
+            "y": y,
+            "z": z
+        }
+        headers = config.HEADERS
+        return send_request(endpoint, payload, headers)
+    except Exception as e:
+        logging.error("Move body by index failed: %s", e)
+        raise
+
+@mcp.tool()
+def list_bodies():
+    """
+    Listet alle Körper im aktuellen Modell auf.
+    Gibt für jeden Körper Index, Name, Zentrum (Bounding-Box-Mittelpunkt)
+    und Größe (dx, dy, dz) zurück.
+    Nützlich um den Index für rotate_body_by_index, delete_body_by_index
+    oder move_body_by_index zu bestimmen.
+    """
+    try:
+        endpoint = config.ENDPOINTS["list_bodies"]
+        response = requests.get(endpoint, timeout=config.REQUEST_TIMEOUT)
+        return response.json()
+    except Exception as e:
+        logging.error("List bodies failed: %s", e)
+        raise
+
+@mcp.tool()
+def get_selection():
+    """
+    Liest die aktuell in Fusion 360 ausgewählten Entitäten (was der User markiert hat).
+    Für kreisförmige Kanten und zylindrische Flächen (Bohrungen/Löcher) liefert es
+    Zentrum (center) und Durchmesser (diameter); sonst das Bounding-Box-Zentrum.
+    Koordinaten in cm (Fusion-intern) -> *10 ergibt mm.
+    Ideal um z.B. ausgewählte M3-Löcher direkt aus dem Modell auszulesen,
+    statt sie manuell zu vermessen. Der User muss die Entitäten in Fusion markieren.
+    """
+    try:
+        endpoint = config.ENDPOINTS["get_selection"]
+        response = requests.get(endpoint, timeout=config.REQUEST_TIMEOUT)
+        return response.json()
+    except Exception as e:
+        logging.error("Get selection failed: %s", e)
+        raise
+
+@mcp.tool()
+def get_sketch_points():
+    """
+    Reads the currently selected SKETCH POINTS in Fusion 360 (points the user has
+    marked inside a sketch). This is the right tool when the user selects sketch
+    points (e.g. hole-center points, mounting points for screws/motors) rather than
+    finished holes or faces. Unlike get_selection, this tool is robust for sketch
+    points even inside components/assemblies: it never returns empty just because a
+    single point fails to read.
+
+    For each selected sketch point it returns:
+      - index: position in the selection
+      - parentSketch: name of the parent sketch (if readable)
+      - world_cm / world_mm: GLOBAL model-space coordinates in cm and in mm
+      - local_cm / local_mm: LOCAL sketch-plane coordinates in cm and in mm
+
+    Coordinate convention: Fusion stores internally in cm; the *_mm fields are
+    already converted (cm * 10 = mm) for convenience. Prefer world_mm for real
+    positions in the model. The user must select the sketch points in Fusion first.
+    """
+    try:
+        endpoint = config.ENDPOINTS["get_sketch_points"]
+        response = requests.get(endpoint, timeout=config.REQUEST_TIMEOUT)
+        return response.json()
+    except Exception as e:
+        logging.error("Get sketch points failed: %s", e)
+        raise
+
+@mcp.tool()
 def create_thread(inside: bool, allsizes: int):
     """Erstellt ein Gewinde in Fusion 360
     Im Moment wählt der User selber in Fusioibn 360 das Profil aus
